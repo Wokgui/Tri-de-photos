@@ -1,0 +1,94 @@
+TRI DE PHOTOS 14.29 — ÉDITION DEUX MAQUETTES
+
+Cette édition aligne les deux écrans principaux sur les modèles fournis :
+- accueil avec le grand bandeau et la mise en page 1664 × 928 ;
+- comparaison avec le bandeau compact, la progression intégrée en haut,
+  deux aperçus égaux et cinq actions compactes ;
+- dans la nouvelle vue de tri, les statistiques sont intégrées en haut à droite,
+  les photos occupent davantage de hauteur et les cinq commandes compactes
+  affichent uniquement la touche et son action sur une seule ligne ;
+- l'accueil utilise un fond décoratif continu, une navigation centrée, une
+  commande d'analyse plus élégante et un bloc de reprise entièrement centré ;
+- le fond est recalculé sur toute la largeur de la fenêtre : aucune bande
+  latérale ni ancien halo derrière la commande d'analyse ;
+- la phrase d'introduction est fusionnée au fond sans surlignage, les blocs de
+  l'accueil sont remontés et les couleurs inférieures reprennent celles du bandeau ;
+- sur le tri, les intitulés de progression restent complets et les commandes
+  sont centrées entre des marges blanches égales sous des photos agrandies ;
+- le menu du tri, la séparation centrale et le cercle VS partagent exactement
+  le même axe ; le cercle est entièrement visible entre les deux photos ;
+- les statistiques ont la même taille de texte que le menu, sont alignées au
+  bord droit du panneau photo et leur séparateur dispose de marges régulières ;
+- la date et la résolution sont affichées à droite du nom de chaque photo pour
+  laisser davantage de hauteur aux aperçus ; leur police est agrandie et leur
+  présentation compacte conserve date, heure, dimensions et mégapixels ;
+- le bouton d'agrandissement ouvre désormais la photo en véritable plein écran
+  (F11 ou double-clic pour basculer, Échap pour quitter le plein écran) ;
+- la commande violette « Supprimer les deux » écarte bien les deux photos de la
+  sélection finale, sans modifier les originaux ;
+- le bas de l'accueil reprend les halos bleus des coins et le centre clair du
+  modèle, sans assombrissement gris sur toute la page ;
+- sur l'accueil, le logo partage exactement le bord gauche du titre « Trier vos
+  photos, simplement » et le menu partage le bord droit du dossier à analyser ;
+- le décor inférieur renforce les grandes formes pastel, les courbes blanches et
+  les deux coins bleutés du modèle, tout en restant continu et responsive ;
+- sur la comparaison, le logo est aligné avec le bord gauche du grand panneau ;
+  les textes du menu et des statistiques ont été agrandis ;
+- les statistiques utilisent deux lignes bien espacées pour éviter tout
+  chevauchement entre photos traitées, comparaisons, gardées et écartées ;
+- les cinq commandes colorées sont réunies en une rangée équilibrée juste sous
+  les photos et restent visibles même à la taille minimale de la fenêtre ;
+- dans chacun des trois segments du menu, l'icône et son texte forment un groupe
+  exactement centré, quelle que soit la largeur de la fenêtre ;
+- dans les statistiques, la barre de progression partage son axe gauche avec
+  « Gardées » et le pourcentage son axe droit avec « Écartées » ;
+- le petit séparateur vertical est calculé au milieu de l'espace réellement
+  visible entre « Gardées : 0 » et « Écartées : 0 » ;
+- sur l'accueil, les cartes « Enregistrement du résultat », « Analyser le
+  dossier » et « Reprendre un travail » partagent la même largeur centrale ;
+- la carte de reprise reste dans la partie claire du décor afin que ses quatre
+  coins arrondis soient propres et identiques ;
+- chaque photo est affichée entièrement dans son rapport largeur/hauteur réel :
+  aucun recadrage n'est appliqué pour remplir artificiellement le cadre ;
+- la largeur du panneau utilise automatiquement l'espace disponible et sa
+  hauteur s'adapte au format de la paire, sans grandes bandes noires ;
+- adaptation proportionnelle à la fenêtre, qu'elle soit maximisée ou réduite ;
+- redimensionnement libre et continu grâce à la poignée visible dans l'angle
+  inférieur droit, de 1000 × 620 jusqu'à la taille de l'écran ;
+- le premier clic sur le carré maximise réellement la fenêtre, même s'il est
+  effectué dès son apparition ; la taille et la position normales sont ensuite
+  restaurées exactement par l'icône à deux fenêtres ;
+- pendant ce bref recalcul, une copie proportionnelle de la fenêtre empêche
+  tout écran blanc, toute superposition fantôme et toute vue étirée ;
+- cette copie transitoire utilise maintenant un calcul plus léger et disparaît
+  plus rapidement après le clic d'agrandissement ;
+- sur l'accueil, la copie normale et sa version plein écran sont préparées en
+  arrière-plan après l'ouverture : le clic n'attend plus ni capture ni mise à
+  l'échelle et ne conserve que le bref basculement imposé par Windows ;
+- en fenêtre maximisée, le carré devient l'icône Windows « Restaurer » à deux
+  fenêtres, puis reprend sa forme initiale après restauration ;
+- les cadres photo utilisent toute la hauteur calculée selon le format original
+  et n'affichent plus de bande noire résiduelle pendant leur mise en place ;
+- les commandes reposent sur une rangée native stable, visible aux tailles
+  minimale, normale et maximisée ;
+- choix de la taille dans Réglages > Affichage : Automatique, 75 %, 90 %,
+  100 %, 110 %, 125 % ou 150 % ;
+- dans Réglages, les six cartes ont exactement la même largeur et la même
+  hauteur par rangée ; tous leurs titres sont centrés dans un bandeau discret ;
+- les explications de « Sauvegarde » et « Affichage » utilisent toute la largeur
+  disponible avant de revenir proprement à la ligne ;
+- leur largeur d'écriture suit désormais réellement la largeur de la carte :
+  les mots ne reviennent plus prématurément à la ligne sur un grand écran ;
+- les quatre points de « Comportement » sont plus grands, tiennent chacun sur
+  une seule ligne en grand écran et sont regroupés sans espace superflu ;
+- les trois symboles réduire, restaurer et fermer sont plus discrets et mieux
+  proportionnés au reste du bandeau ;
+- les raccourcis de Réglages reprennent les couleurs rouge, verte, bleue,
+  violette et grise du tri sous une forme plus compacte, avec une marge basse ;
+- les pourcentages servent de taille maximale et l'interface se réduit toujours
+  automatiquement si la fenêtre devient trop petite ;
+- adaptation nette au zoom Windows, sans mélange d'échelles ;
+- fichiers originaux, analyse, reprise et sauvegarde conservés.
+
+1. Lancez INSTALLER.bat une seule fois.
+2. Lancez ensuite LANCER_TRIPHOTOS.bat.
