@@ -20,10 +20,9 @@ del /f /q "%~dp0tri_de_photos_bureau.ico" >nul 2>&1
 del /f /q "%~dp0tri_de_photos_bureau.ico.b64" >nul 2>&1
 if not exist "%ICON_DIR%" mkdir "%ICON_DIR%"
 
-rem Cree l'icone Windows a partir du visuel exact de triphotos_icon.png.
-rem Recadre la marge blanche exterieure puis rend les coins exterieurs transparents.
-rem La tuile, le logo et le texte restent inchanges.
-py -c "from PIL import Image,ImageDraw,ImageChops; import os; src=Image.open(os.environ['ICON_SRC']).convert('RGBA'); w,h=src.size; m=int(min(w,h)*0.055); src=src.crop((m,m,w-m,h-m)); s=min(src.size); src=src.crop(((src.width-s)//2,(src.height-s)//2,(src.width+s)//2,(src.height+s)//2)); mask=Image.new('L',src.size,0); r=int(s*0.16); ImageDraw.Draw(mask).rounded_rectangle((0,0,s-1,s-1),radius=r,fill=255); src.putalpha(ImageChops.multiply(src.getchannel('A'),mask)); src.save(os.environ['ICON'],format='ICO',sizes=[(256,256),(128,128),(96,96),(64,64),(48,48),(32,32),(24,24),(16,16)])"
+rem Cree l'icone sans la grande carte blanche : on garde seulement
+rem l'objectif/les anneaux et le texte Tri de photos, tout le reste devient transparent.
+py -c "from PIL import Image,ImageDraw,ImageChops,ImageOps; import os; src=Image.open(os.environ['ICON_SRC']).convert('RGBA').resize((512,512),Image.Resampling.LANCZOS); out=Image.new('RGBA',(512,512),(0,0,0,0)); lens=src.copy(); mask=Image.new('L',(512,512),0); ImageDraw.Draw(mask).ellipse((52,18,460,426),fill=255); lens.putalpha(ImageChops.multiply(lens.getchannel('A'),mask)); out.alpha_composite(lens); txt=src.crop((82,382,430,474)); px=list(txt.getdata()); txt.putdata([(r,g,b,0 if (max(r,g,b)>220 and max(r,g,b)-min(r,g,b)<45) else a) for r,g,b,a in px]); out.alpha_composite(txt,(82,382)); box=out.getbbox() or (0,0,512,512); out=out.crop(box); s=max(out.size); pad=max(8,int(s*0.035)); canvas=Image.new('RGBA',(s+2*pad,s+2*pad),(0,0,0,0)); canvas.alpha_composite(out,((canvas.width-out.width)//2,(canvas.height-out.height)//2)); canvas.save(os.environ['ICON'],format='ICO',sizes=[(256,256),(128,128),(96,96),(64,64),(48,48),(32,32),(24,24),(16,16)])"
 if errorlevel 1 (
     echo Erreur lors de la creation de l'icone.
     pause
