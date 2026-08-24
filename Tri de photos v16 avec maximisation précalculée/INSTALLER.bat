@@ -20,10 +20,10 @@ del /f /q "%~dp0tri_de_photos_bureau.ico" >nul 2>&1
 del /f /q "%~dp0tri_de_photos_bureau.ico.b64" >nul 2>&1
 if not exist "%ICON_DIR%" mkdir "%ICON_DIR%"
 
-rem Cree un vrai fichier ICO Windows multi-resolution en gardant EXACTEMENT
-rem le visuel de triphotos_icon.png : aucune recoloration, aucun recadrage,
-rem aucun fond ajoute et aucun changement du logo.
-py -c "from PIL import Image; import os; src=Image.open(os.environ['ICON_SRC']).convert('RGBA'); src.save(os.environ['ICON'],format='ICO',sizes=[(256,256),(128,128),(96,96),(64,64),(48,48),(32,32),(24,24),(16,16)])"
+rem Cree l'icone Windows a partir du visuel exact de triphotos_icon.png.
+rem Le fond carre exterieur, connecte aux coins de l'image, devient transparent.
+rem La tuile arrondie, le logo et le texte a l'interieur restent inchanges.
+py -c "from PIL import Image,ImageDraw; import os; src=Image.open(os.environ['ICON_SRC']).convert('RGBA'); w,h=src.size; [ImageDraw.floodfill(src,p,(255,255,255,0),thresh=42) for p in ((0,0),(w-1,0),(0,h-1),(w-1,h-1))]; src.save(os.environ['ICON'],format='ICO',sizes=[(256,256),(128,128),(96,96),(64,64),(48,48),(32,32),(24,24),(16,16)])"
 if errorlevel 1 (
     echo Erreur lors de la creation de l'icone.
     pause
