@@ -10,7 +10,7 @@ set "APPDIR=%~dp0"
 set "SCRIPT=%~dp0triphotos_v14_29.py"
 set "ICON_SRC=%~dp0triphotos_icon_final.png"
 set "ICON_DIR=%LOCALAPPDATA%\Tri de photos"
-set "ICON=%LOCALAPPDATA%\Tri de photos\Tri de photos final v11.ico"
+set "ICON=%LOCALAPPDATA%\Tri de photos\Tri de photos final v12.ico"
 set "LOCAL_LINK=%~dp0Tri de photos.lnk"
 
 rem Nettoie les anciens lanceurs.
@@ -23,8 +23,9 @@ if not exist "%ICON_DIR%" mkdir "%ICON_DIR%"
 rem Supprime les anciennes icones generees pour eviter le cache Windows.
 del /f /q "%LOCALAPPDATA%\Tri de photos\Tri de photos*.ico" >nul 2>&1
 
-rem Cree l'ICO Windows directement a partir du PNG final valide stocke dans le depot.
-py -c "from PIL import Image; import os; src=Image.open(os.environ['ICON_SRC']); src.load(); src=src.convert('RGBA'); src.save(os.environ['ICON'],format='ICO',sizes=[(96,96),(64,64),(48,48),(32,32),(24,24),(16,16)])"
+rem Recadre les marges transparentes, agrandit le visuel presque au maximum,
+rem puis cree un vrai ICO Windows multi-resolution net.
+py -c "from PIL import Image,ImageOps; import os; src=Image.open(os.environ['ICON_SRC']).convert('RGBA'); src.load(); alpha=src.getchannel('A'); mask=alpha.point(lambda x:255 if x>=5 else 0); bbox=mask.getbbox() or (0,0,src.width,src.height); src=src.crop(bbox); icon=ImageOps.contain(src,(244,244),method=Image.Resampling.LANCZOS); base=Image.new('RGBA',(256,256),(0,0,0,0)); base.alpha_composite(icon,((256-icon.width)//2,(256-icon.height)//2)); base.save(os.environ['ICON'],format='ICO',sizes=[(256,256),(128,128),(96,96),(64,64),(48,48),(32,32),(24,24),(16,16)])"
 if errorlevel 1 (
     echo Erreur lors de la creation de l'icone Windows.
     pause
@@ -43,5 +44,5 @@ ie4uinit.exe -show >nul 2>&1
 
 echo.
 echo Installation terminee.
-echo L'icone du dossier et du Bureau utilise le visuel final valide.
+echo L'icone Tri de photos est maintenant agrandie et nette dans le dossier et sur le Bureau.
 pause
