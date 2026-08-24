@@ -21,9 +21,9 @@ del /f /q "%~dp0tri_de_photos_bureau.ico.b64" >nul 2>&1
 if not exist "%ICON_DIR%" mkdir "%ICON_DIR%"
 
 rem Cree l'icone Windows a partir du visuel exact de triphotos_icon.png.
-rem Le fond carre exterieur, connecte aux coins de l'image, devient transparent.
-rem La tuile arrondie, le logo et le texte a l'interieur restent inchanges.
-py -c "from PIL import Image,ImageDraw; import os; src=Image.open(os.environ['ICON_SRC']).convert('RGBA'); w,h=src.size; [ImageDraw.floodfill(src,p,(255,255,255,0),thresh=42) for p in ((0,0),(w-1,0),(0,h-1),(w-1,h-1))]; src.save(os.environ['ICON'],format='ICO',sizes=[(256,256),(128,128),(96,96),(64,64),(48,48),(32,32),(24,24),(16,16)])"
+rem Recadre la marge blanche exterieure puis rend les coins exterieurs transparents.
+rem La tuile, le logo et le texte restent inchanges.
+py -c "from PIL import Image,ImageDraw,ImageChops; import os; src=Image.open(os.environ['ICON_SRC']).convert('RGBA'); w,h=src.size; m=int(min(w,h)*0.055); src=src.crop((m,m,w-m,h-m)); s=min(src.size); src=src.crop(((src.width-s)//2,(src.height-s)//2,(src.width+s)//2,(src.height+s)//2)); mask=Image.new('L',src.size,0); r=int(s*0.16); ImageDraw.Draw(mask).rounded_rectangle((0,0,s-1,s-1),radius=r,fill=255); src.putalpha(ImageChops.multiply(src.getchannel('A'),mask)); src.save(os.environ['ICON'],format='ICO',sizes=[(256,256),(128,128),(96,96),(64,64),(48,48),(32,32),(24,24),(16,16)])"
 if errorlevel 1 (
     echo Erreur lors de la creation de l'icone.
     pause
