@@ -1,0 +1,22 @@
+name: Package ZIP
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create ZIP
+        run: |
+          cd "Tri de photos v16 avec maximisation précalculée"
+          zip -r ../Tri-de-photos-v16-icone-corrigee.zip .
+      - name: Upload ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: Tri-de-photos-v16-icone-corrigee
+          path: Tri-de-photos-v16-icone-corrigee.zip
+          compression-level: 0
