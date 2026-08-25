@@ -89,6 +89,9 @@ Cette édition aligne les deux écrans principaux sur les modèles fournis :
   automatiquement si la fenêtre devient trop petite ;
 - adaptation nette au zoom Windows, sans mélange d'échelles ;
 - fichiers originaux, analyse, reprise et sauvegarde conservés.
+- une nouvelle analyse d'un dossier recommence toujours le tri depuis le début,
+  sans réutiliser les photos marquées comme traitées dans la session précédente ;
+  les boutons de reprise restent disponibles pour continuer volontairement un tri.
 
 1. Lancez INSTALLER.bat une seule fois.
 2. Lancez ensuite LANCER_TRIPHOTOS.bat.

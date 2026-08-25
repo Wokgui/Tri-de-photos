@@ -383,6 +383,61 @@ def atomic_write_text(path, text):
     temp.write_text(text, encoding="utf-8")
     os.replace(temp, path)
 
+
+def build_fresh_session(source, photos, records, skipped, groups, threshold, time_window):
+    """Construit un nouveau tri sans reprendre aucun avancement antérieur.
+
+    Les fichiers de session servent uniquement aux commandes explicites de
+    reprise. Une analyse lancée depuis « Analyser le dossier » repart toujours
+    avec toutes les comparaisons en attente et aucun fichier déjà traité.
+    """
+    fresh_groups = []
+    for original_group in groups:
+        group = dict(original_group)
+        items = list(group.get("items", []))
+        group["status"] = "pending"
+        group["kept"] = []
+        group["rejected"] = []
+        group["aside"] = []
+        group["candidate"] = items[0] if items else None
+        group["remaining"] = items[1:]
+        group.pop("display_left", None)
+        group.pop("display_right", None)
+        fresh_groups.append(group)
+
+    paired_paths = {
+        path for group in fresh_groups for path in group.get("items", [])
+    }
+    unique_paths = [
+        record["path"] for record in records if record["path"] not in paired_paths
+    ]
+    now = datetime.now().isoformat()
+    return {
+        "version": "14.21",
+        "source_dir": str(source),
+        "output_dir": "",
+        "created_at": now,
+        "updated_at": now,
+        "total_files": len(photos),
+        "all_files": [str(path) for path in photos],
+        "analyzed_files": len(records),
+        "skipped": list(skipped),
+        "unique_keep": sorted(unique_paths, key=natural_path_key),
+        "global_rejected": [],
+        "groups": fresh_groups,
+        "group_index": 0,
+        "similarity_threshold": threshold,
+        "time_window": time_window,
+        "automatic_keep_both": 0,
+        "comparisons_done": 0,
+        "total_candidate_pairs": len(fresh_groups),
+        "total_unique_reviews": 0,
+        "reviewed_files": [],
+        "decisions": {"kept": 0, "rejected": 0},
+        "review_complete": False,
+        "complete": False,
+    }
+
 def is_relative_to(path, parent):
     try:
         Path(path).resolve().relative_to(Path(parent).resolve())
@@ -672,6 +727,8 @@ class TriPhotosApp(ctk.CTk):
         self.config_dir = self.desktop_dir / "TriPhotos - Travail en cours"
         self.config_dir.mkdir(parents=True, exist_ok=True)
         self.settings_path = self.config_dir / "settings.json"
+        # L'avancement est persisté dans working_session.json et dans cette copie
+        # de dernière session. Ils sont chargés uniquement par les actions de reprise.
         self.last_session_path = self.config_dir / "last_session.json"
 
         old_dir = Path.home() / ".triphotos_v3"
@@ -1961,6 +2018,9 @@ class TriPhotosApp(ctk.CTk):
             messagebox.showerror("Dossier introuvable", "Choisis un dossier valide.")
             return
 
+        # Une sélection de dossier lance toujours un nouveau tri. L'ancienne
+        # session reste disponible via les commandes de reprise jusqu'à ce que
+        # la nouvelle analyse, entièrement reconstruite, soit sauvegardée.
         self.settings["resume_session"] = False
         self.save_settings()
         self.session = None
@@ -2122,34 +2182,11 @@ class TriPhotosApp(ctk.CTk):
             # Les photos sans correspondance pertinente sont conservées automatiquement.
             # Elles ne sont jamais associées artificiellement à une photo voisine : l'écran
             # « deux par deux » ne montre donc que de vraies comparaisons.
-            readable_paths = [r["path"] for r in records]
-            unique_paths = [path for path in readable_paths if path not in paired_paths]
-
-            self.session = {
-                "version": "14.21",
-                "source_dir": str(source),
-                "output_dir": "",
-                "created_at": datetime.now().isoformat(),
-                "updated_at": datetime.now().isoformat(),
-                "total_files": len(photos),
-                "all_files": [str(path) for path in photos],
-                "analyzed_files": len(records),
-                "skipped": skipped,
-                "unique_keep": sorted(unique_paths, key=natural_path_key),
-                "global_rejected": [],
-                "groups": groups,
-                "group_index": 0,
-                "similarity_threshold": threshold,
-                "time_window": time_window,
-                "automatic_keep_both": 0,
-                "comparisons_done": 0,
-                "total_candidate_pairs": len(ordered_pairs),
-                "total_unique_reviews": 0,
-                "reviewed_files": [],
-                "decisions": {"kept": 0, "rejected": 0},
-                "review_complete": False,
-                "complete": False
-            }
+            # Ne jamais fusionner cette analyse avec working_session.json ou
+            # last_session.json : toutes les comparaisons repartent à zéro.
+            self.session = build_fresh_session(
+                source, photos, records, skipped, groups, threshold, time_window
+            )
             self.save_session(force=True)
             self.call_on_ui(progress.destroy)
             self.call_on_ui(self.show_review)
