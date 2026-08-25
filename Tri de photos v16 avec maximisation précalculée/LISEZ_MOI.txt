@@ -96,6 +96,8 @@ Cette édition aligne les deux écrans principaux sur les modèles fournis :
   exacts et proches sont regroupés en priorité, puis les autres photos sont elles
   aussi affichées deux par deux, même très différentes ; seule une dernière photo
   impaire est validée seule, sans conservation automatique silencieuse.
+- le bandeau utilise l'icône « Tri de photos » approuvée avec son extérieur
+  transparent, sans carte blanche, ombre ni encart supplémentaire autour.
 
 1. Lancez INSTALLER.bat une seule fois.
 2. Lancez ensuite LANCER_TRIPHOTOS.bat.

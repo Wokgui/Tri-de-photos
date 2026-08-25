@@ -3,12 +3,15 @@ import unittest
 from datetime import datetime
 from pathlib import Path
 
+from PIL import Image
+
 
 APP_PATH = (
     Path(__file__).parents[1]
     / "Tri de photos v16 avec maximisation précalculée"
     / "triphotos_v14_29.py"
 )
+ICON_PATH = APP_PATH.with_name("triphotos_icon_final.png")
 
 
 def load_session_helpers():
@@ -54,6 +57,26 @@ def load_session_helpers():
 
 
 class FreshSessionTests(unittest.TestCase):
+    def test_header_uses_the_approved_transparent_icon_without_extra_shell(self):
+        source = APP_PATH.read_text(encoding="utf-8")
+        self.assertNotIn('with_name("triphotos_header_icon.png")', source)
+        self.assertGreaterEqual(
+            source.count('with_name("triphotos_icon_final.png")'), 2
+        )
+        self.assertNotIn("round_rect(shell_x1", source)
+
+        with Image.open(ICON_PATH).convert("RGBA") as icon:
+            self.assertEqual(icon.size, (96, 96))
+            self.assertTrue(all(
+                icon.getpixel(point)[3] == 0
+                for point in (
+                    (0, 0),
+                    (icon.width - 1, 0),
+                    (0, icon.height - 1),
+                    (icon.width - 1, icon.height - 1),
+                )
+            ))
+
     def test_previous_progress_is_reset_for_a_new_folder_analysis(self):
         source = Path("C:/Photos/Vacances")
         photos = [source / "photo1.jpg", source / "photo2.jpg", source / "photo3.jpg"]

@@ -875,7 +875,7 @@ class TriPhotosApp(ctk.CTk):
             icon = Image.open(icon_path)
             self.window_icon = ImageTk.PhotoImage(icon)
             self.iconphoto(True, self.window_icon)
-            header_icon_path = Path(__file__).with_name("triphotos_header_icon.png")
+            header_icon_path = Path(__file__).with_name("triphotos_icon_final.png")
             header_icon = Image.open(header_icon_path) if header_icon_path.exists() else icon
             self.icon_image = ctk.CTkImage(light_image=header_icon, dark_image=header_icon, size=(94, 94))
 
@@ -1573,7 +1573,7 @@ class TriPhotosApp(ctk.CTk):
         self.header_canvas.bind("<ButtonRelease-1>", self._stop_window_drag, add="+")
 
         # Images Canvas chargées depuis les assets PNG transparents.
-        self._header_logo_pil = Image.open(Path(__file__).with_name("triphotos_header_icon.png")).convert("RGBA")
+        self._header_logo_pil = Image.open(Path(__file__).with_name("triphotos_icon_final.png")).convert("RGBA")
         self._header_home_pil = Image.open(Path(__file__).with_name("home.png")).convert("RGBA")
         self._header_save_pil = Image.open(Path(__file__).with_name("save.png")).convert("RGBA")
         self._header_settings_pil = Image.open(Path(__file__).with_name("settings.png")).convert("RGBA")
@@ -1654,8 +1654,7 @@ class TriPhotosApp(ctk.CTk):
         if variant == "home":
             # Même bord gauche que le contenu principal (x=183) : le logo est
             # maintenant exactement aligné avec « Trier vos photos ».
-            shell_x1, shell_y1, shell_x2, shell_y2 = 183, 36, 303, 154
-            logo_size = (108, 108)
+            logo_size = (120, 120)
             logo_center = (243, 95)
             brand_x, brand_y, brand_size = 328, 82, 45
             subtitle_x, subtitle_y, subtitle_size = 329, 123, 18
@@ -1665,8 +1664,7 @@ class TriPhotosApp(ctk.CTk):
             nav_font = 16
         else:
             # Bord gauche commun au grand panneau de comparaison (x=24).
-            shell_x1, shell_y1, shell_x2, shell_y2 = 24, 26, 119, 123
-            logo_size = (84, 84)
+            logo_size = (96, 96)
             logo_center = (71, 74)
             brand_x, brand_y, brand_size = 135, 60, 32
             subtitle_x, subtitle_y, subtitle_size = 135, 94, 14
@@ -1675,9 +1673,8 @@ class TriPhotosApp(ctk.CTk):
             nav_x1, nav_y1, nav_x2, nav_y2 = 410, 50, 990, 108
             nav_font = 14
 
-        # Ombres discrètes visibles sur les deux maquettes.
-        round_rect(shell_x1 + 2, shell_y1 + 5, shell_x2 + 2, shell_y2 + 5, 20, fill="#DCE3EE", outline="")
-        round_rect(shell_x1, shell_y1, shell_x2, shell_y2, 20, fill="#FFFFFF", outline="#E2E8F2", width=line_width())
+        # L'icône approuvée possède déjà son détourage transparent : aucun
+        # encart, fond blanc ni ombre supplémentaire ne doit l'entourer.
         scaled_logo_size = tuple(max(1, int(round(v * scale))) for v in logo_size)
         logo = self._header_photo(self._header_logo_pil, scaled_logo_size)
         canvas.create_image(sx(logo_center[0]), sy(logo_center[1]), image=logo, anchor="center")
