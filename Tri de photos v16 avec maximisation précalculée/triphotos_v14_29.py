@@ -430,7 +430,7 @@ def build_fresh_session(source, photos, records, skipped, groups, threshold, tim
         "time_window": time_window,
         "automatic_keep_both": 0,
         "comparisons_done": 0,
-        "total_candidate_pairs": len(fresh_groups),
+        "total_candidate_pairs": review_step_count(fresh_groups),
         "total_unique_reviews": 0,
         "reviewed_files": [],
         "decisions": {"kept": 0, "rejected": 0},
@@ -442,58 +442,91 @@ def build_fresh_session(source, photos, records, skipped, groups, threshold, tim
 def build_complete_review_queue(records, pair_types, source_order):
     """Crée une file où chaque photo lisible apparaît exactement une fois.
 
-    Les doublons et photos proches sont associés en priorité. Les photos sans
-    correspondance restent des étapes individuelles au lieu d'être classées
-    automatiquement, afin qu'une nouvelle analyse reparte vraiment du début.
+    Les doublons exacts puis les photos proches sont associés en priorité. Les
+    photos restantes sont elles aussi affichées deux par deux, même différentes.
+    Une photo n'est présentée seule que si le nombre total est impair.
     """
     records_by_path = {record["path"]: record for record in records}
     used_paths = set()
     groups = []
-    ordered_pairs = sorted(
-        pair_types.items(),
-        key=lambda item: (
-            source_order.get(item[0][0], len(source_order)),
-            source_order.get(item[0][1], len(source_order)),
-            0 if item[1] == "exact" else 1,
-        ),
-    )
-
-    for (left_path, right_path), pair_type in ordered_pairs:
-        if left_path in used_paths or right_path in used_paths:
-            continue
+    adjacency = {path: set() for path in records_by_path}
+    for left_path, right_path in pair_types:
         if left_path not in records_by_path or right_path not in records_by_path:
             continue
-        used_paths.update((left_path, right_path))
+        adjacency[left_path].add(right_path)
+        adjacency[right_path].add(left_path)
+
+    for start_path in sorted(records_by_path, key=lambda path: source_order.get(path, len(source_order))):
+        if start_path in used_paths or not adjacency[start_path]:
+            continue
+        component = set()
+        pending = [start_path]
+        while pending:
+            path = pending.pop()
+            if path in component:
+                continue
+            component.add(path)
+            pending.extend(adjacency[path] - component)
+
+        items = sorted(
+            component, key=lambda path: source_order.get(path, len(source_order))
+        )
+        used_paths.update(items)
+        component_edge_types = {
+            pair_type
+            for (left_path, right_path), pair_type in pair_types.items()
+            if left_path in component and right_path in component
+        }
+        group_type = "exact" if component_edge_types == {"exact"} else "similar"
         groups.append({
-            "type": pair_type,
-            "items": [left_path, right_path],
-            "records": {
-                left_path: records_by_path[left_path],
-                right_path: records_by_path[right_path],
-            },
+            "type": group_type,
+            "items": items,
+            "records": {path: records_by_path[path] for path in items},
             "status": "pending",
             "kept": [],
             "rejected": [],
             "aside": [],
-            "candidate": left_path,
-            "remaining": [right_path],
+            "candidate": items[0],
+            "remaining": items[1:],
         })
 
-    for record in records:
-        path = record["path"]
-        if path in used_paths:
+    remaining_records = [
+        record for record in records if record["path"] not in used_paths
+    ]
+    for index in range(0, len(remaining_records), 2):
+        left_record = remaining_records[index]
+        left_path = left_record["path"]
+        if index + 1 < len(remaining_records):
+            right_record = remaining_records[index + 1]
+            right_path = right_record["path"]
+            used_paths.update((left_path, right_path))
+            groups.append({
+                "type": "manual",
+                "items": [left_path, right_path],
+                "records": {
+                    left_path: left_record,
+                    right_path: right_record,
+                },
+                "status": "pending",
+                "kept": [],
+                "rejected": [],
+                "aside": [],
+                "candidate": left_path,
+                "remaining": [right_path],
+            })
             continue
-        used_paths.add(path)
+
+        used_paths.add(left_path)
         groups.append({
             "type": "unique",
-            "items": [path],
-            "records": {path: record},
+            "items": [left_path],
+            "records": {left_path: left_record},
             "status": "pending",
             "kept": [],
             "rejected": [],
             "aside": [],
-            "unique_target": path,
-            "candidate": path,
+            "unique_target": left_path,
+            "candidate": left_path,
             "remaining": [],
         })
 
@@ -504,6 +537,11 @@ def build_complete_review_queue(records, pair_types, source_order):
         )
     )
     return groups
+
+
+def review_step_count(groups):
+    """Compte les décisions nécessaires pour terminer toute la file."""
+    return sum(max(1, len(group.get("items", [])) - 1) for group in groups)
 
 def is_relative_to(path, parent):
     try:
@@ -1944,7 +1982,7 @@ class TriPhotosApp(ctk.CTk):
         )
         canvas.create_text(
             content_x, 77 * scale,
-            text="Choisissez un dossier. Chaque photo sera présentée depuis le début ; les photos réellement proches seront comparées deux par deux.",
+            text="Choisissez un dossier. Les doublons proches sont regroupés en priorité, puis toutes les autres photos sont aussi présentées deux par deux.",
             anchor="nw", fill="#66789A",
             font=("Segoe UI", -max(1, int(round(16 * scale)))),
             tags="home_background",
@@ -2220,7 +2258,7 @@ class TriPhotosApp(ctk.CTk):
                 pair_types.setdefault(key, "similar")
 
             # Toutes les photos lisibles entrent dans la file. Les ressemblances
-            # sont comparées deux par deux et les autres sont validées une à une.
+            # sont prioritaires, puis les autres sont aussi affichées par paires.
             groups = build_complete_review_queue(records, pair_types, source_order)
             # Ne jamais fusionner cette analyse avec working_session.json ou
             # last_session.json : toutes les comparaisons repartent à zéro.
@@ -2294,7 +2332,7 @@ class TriPhotosApp(ctk.CTk):
         while idx < len(cleaned_groups) and cleaned_groups[idx].get("status") != "pending":
             idx += 1
         session["group_index"] = idx
-        session["total_candidate_pairs"] = len(cleaned_groups)
+        session["total_candidate_pairs"] = review_step_count(cleaned_groups)
         return session
 
     def activate_session(self, session, source, loaded_from=None):
@@ -2736,7 +2774,14 @@ class TriPhotosApp(ctk.CTk):
         if not left or not right:
             return
         records = group.get("records", {})
-        self.fill_photo(self.left_card, left, records.get(left, {}), "left", recommended=False)
+        pair_badge = {
+            "exact": "Doublon exact",
+            "similar": "Photos proches",
+        }.get(group.get("type"), "")
+        self.fill_photo(
+            self.left_card, left, records.get(left, {}), "left",
+            recommended=False, badge=pair_badge
+        )
         self.fill_photo(self.right_card, right, records.get(right, {}), "right", recommended=True)
 
     def action_btn(self, parent, column, text, shortcut, color, hover, command, text_color=None, icon=None):
@@ -2906,7 +2951,14 @@ class TriPhotosApp(ctk.CTk):
             group["display_right"] = right
             if session_changed:
                 self.save_session()
-            self.fill_photo(self.left_card, left, records.get(left, {}), "left", recommended=False)
+            pair_badge = {
+                "exact": "Doublon exact",
+                "similar": "Photos proches",
+            }.get(group.get("type"), "")
+            self.fill_photo(
+                self.left_card, left, records.get(left, {}), "left",
+                recommended=False, badge=pair_badge
+            )
             self.fill_photo(self.right_card, right, records.get(right, {}), "right", recommended=True)
             self._schedule_review_geometry(left=left, right=right, records=records)
             self.update_progress_display()
@@ -2931,7 +2983,7 @@ class TriPhotosApp(ctk.CTk):
             draw.line((0, y, width, y), fill=line_color, width=1)
         return overlay.convert("RGB")
 
-    def fill_photo(self, card, path, record, side, recommended=False):
+    def fill_photo(self, card, path, record, side, recommended=False, badge=""):
         try:
             # Le cadre réel est la seule référence fiable. Les anciennes valeurs
             # minimales pouvaient créer une image plus grande que le cadre et donc
@@ -2985,10 +3037,12 @@ class TriPhotosApp(ctk.CTk):
             card["name"].set(p.name)
             card["meta"].set(extra)
             card["score"].set(f"{score_100} / 100")
-            card["recommendation"].set("★ Recommandée" if recommended else "")
+            card["recommendation"].set(
+                badge or ("★ Recommandée" if recommended else "")
+            )
             card["recommendation_label"].configure(
-                fg_color=C["green"] if recommended else "transparent",
-                text_color="#FFFFFF" if recommended else C["muted"]
+                fg_color=C["blue2"] if badge else (C["green"] if recommended else "transparent"),
+                text_color="#FFFFFF" if (badge or recommended) else C["muted"]
             )
             card["hint"].set("")
             # Les deux panneaux restent visuellement intégrés dans un même ensemble.
@@ -3025,7 +3079,7 @@ class TriPhotosApp(ctk.CTk):
     def update_progress_display(self):
         total_files = int(self.session.get("total_files", 0) or 0)
         groups = self.session.get("groups", [])
-        total_comparisons = len(groups)
+        total_comparisons = review_step_count(groups)
         comparisons_done = int(self.session.get("comparisons_done", 0) or 0)
         reviewed = set(self.session.get("reviewed_files", []))
         automatic = set(self.session.get("unique_keep", []))
@@ -3669,7 +3723,7 @@ class TriPhotosApp(ctk.CTk):
         card = self.settings_card(canvas, 1, 2, "Comportement")
         facts = [
             "Chaque photo lisible du dossier est présentée et doit être validée.",
-            "Les photos proches sont comparées deux par deux ; les autres sont présentées seules.",
+            "Les doublons proches sont prioritaires ; les autres photos sont aussi présentées deux par deux.",
             "La touche Suppr écarte les deux photos de la comparaison en cours.",
             "Les fichiers originaux ne sont jamais supprimés ni déplacés.",
         ]

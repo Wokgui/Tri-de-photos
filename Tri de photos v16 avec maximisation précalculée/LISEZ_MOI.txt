@@ -92,9 +92,10 @@ Cette édition aligne les deux écrans principaux sur les modèles fournis :
 - une nouvelle analyse d'un dossier recommence toujours le tri depuis le début,
   sans réutiliser les photos marquées comme traitées dans la session précédente ;
   les boutons de reprise restent disponibles pour continuer volontairement un tri.
-- toutes les photos lisibles sont maintenant remises dans la file : les photos
-  proches sont comparées deux par deux et les autres sont validées une à une,
-  sans conservation automatique silencieuse.
+- toutes les photos lisibles sont maintenant remises dans la file : les doublons
+  exacts et proches sont regroupés en priorité, puis les autres photos sont elles
+  aussi affichées deux par deux, même très différentes ; seule une dernière photo
+  impaire est validée seule, sans conservation automatique silencieuse.
 
 1. Lancez INSTALLER.bat une seule fois.
 2. Lancez ensuite LANCER_TRIPHOTOS.bat.

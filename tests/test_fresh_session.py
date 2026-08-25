@@ -18,6 +18,7 @@ def load_session_helpers():
         "natural_path_key",
         "build_fresh_session",
         "build_complete_review_queue",
+        "review_step_count",
     }
     selected = [
         node
@@ -126,9 +127,13 @@ class FreshSessionTests(unittest.TestCase):
         self.assertEqual(len(queued_paths), 600)
         self.assertEqual(len(set(queued_paths)), 600)
         self.assertEqual(set(queued_paths), {record["path"] for record in records})
-        self.assertEqual(groups[0]["items"], [records[0]["path"]])
-        self.assertEqual(groups[0]["type"], "unique")
+        self.assertEqual(len(groups), 300)
+        self.assertEqual(groups[0]["items"], [records[0]["path"], records[1]["path"]])
+        self.assertEqual(groups[0]["type"], "manual")
         self.assertEqual(groups[-1]["items"], [records[598]["path"], records[599]["path"]])
+        self.assertEqual(groups[-1]["type"], "similar")
+        self.assertEqual(sum(group["type"] == "similar" for group in groups), 5)
+        self.assertEqual(sum(group["type"] == "manual" for group in groups), 295)
         self.assertTrue(all(group["status"] == "pending" for group in groups))
 
         photos = [Path(record["path"]) for record in records]
@@ -141,6 +146,31 @@ class FreshSessionTests(unittest.TestCase):
         self.assertEqual(session["group_index"], 0)
         self.assertEqual(session["comparisons_done"], 0)
         self.assertEqual(session["total_candidate_pairs"], len(groups))
+
+    def test_connected_close_duplicates_stay_in_the_same_group(self):
+        source = Path("C:/Photos/Doublons")
+        records = [
+            {"path": str(source / name), "score": 0.5}
+            for name in ("a.jpg", "b.jpg", "c.jpg", "d.jpg")
+        ]
+        source_order = {
+            record["path"]: index for index, record in enumerate(records)
+        }
+        pair_types = {
+            (records[0]["path"], records[1]["path"]): "similar",
+            (records[0]["path"], records[2]["path"]): "exact",
+        }
+
+        groups = build_complete_review_queue(records, pair_types, source_order)
+
+        self.assertEqual(groups[0]["type"], "similar")
+        self.assertEqual(
+            groups[0]["items"],
+            [records[0]["path"], records[1]["path"], records[2]["path"]],
+        )
+        self.assertEqual(groups[0]["remaining"], [records[1]["path"], records[2]["path"]])
+        self.assertEqual(groups[1]["type"], "unique")
+        self.assertEqual(groups[1]["items"], [records[3]["path"]])
 
     def test_fresh_session_does_not_mutate_the_analyzed_groups(self):
         source = Path("C:/Photos")
