@@ -7,6 +7,7 @@ import shutil
 import hashlib
 import threading
 import queue
+import time
 import subprocess
 import sys
 import ctypes
@@ -132,10 +133,16 @@ def deep_merge(base, update):
             result[key] = value
     return result
 
-def sha256_file(path, chunk=1024 * 1024):
+class AnalysisCancelled(Exception):
+    """Interruption volontaire de l'analyse, distincte d'une erreur de photo."""
+
+
+def sha256_file(path, chunk=1024 * 1024, cancel_check=None):
     h = hashlib.sha256()
     with open(path, "rb") as stream:
         while True:
+            if cancel_check is not None:
+                cancel_check()
             data = stream.read(chunk)
             if not data:
                 break
@@ -157,13 +164,17 @@ def exif_datetime(image):
         pass
     return None
 
-def image_metrics(path):
+def image_metrics(path, cancel_check=None):
+    if cancel_check is not None:
+        cancel_check()
     with Image.open(path) as image:
         dt = exif_datetime(image)
         image = ImageOps.exif_transpose(image).convert("RGB")
         width, height = image.size
         preview = image.copy()
         preview.thumbnail((1600, 1600))
+        if cancel_check is not None:
+            cancel_check()
         arr = np.asarray(preview)
         gray = cv2.cvtColor(arr, cv2.COLOR_RGB2GRAY)
 
@@ -181,6 +192,9 @@ def image_metrics(path):
         iso = exif.get(34855, "—") if exif else "—"
         fnumber = exif.get(33437, "—") if exif else "—"
         exposure_time = exif.get(33434, "—") if exif else "—"
+
+        if cancel_check is not None:
+            cancel_check()
 
         return {
             "path": str(path),
@@ -320,8 +334,9 @@ def find_similar_pairs(records, threshold, time_window, progress=None, cancel_ch
                 cancel_check()
             left = records[i]
             for j in range(i + 1, count):
-                if cancel_check is not None and (j % 120 == 0):
+                if cancel_check is not None and (j % 64 == 0):
                     cancel_check()
+                    time.sleep(0)
                 if records_are_similar(left, records[j], threshold, time_window):
                     matches.add((i, j))
             if progress is not None:
@@ -351,6 +366,9 @@ def find_similar_pairs(records, threshold, time_window, progress=None, cancel_ch
         for left_pos in range(len(ids) - 1):
             i = ids[left_pos]
             for right_pos in range(left_pos + 1, len(ids)):
+                if cancel_check is not None and (right_pos % 64 == 0):
+                    cancel_check()
+                    time.sleep(0)
                 j = ids[right_pos]
                 pair = (i, j) if i < j else (j, i)
                 if pair in matches:
@@ -583,6 +601,9 @@ class ProgressDialog(ctk.CTkToplevel):
         self._parent_map_binding = None
         self._parent_unmap_binding = None
         self._cancelled = threading.Event()
+        self._progress_lock = threading.Lock()
+        self._pending_progress = {}
+        self._progress_enqueued = False
         self.title(title)
         self.geometry("600x258")
         self.resizable(False, False)
@@ -608,12 +629,13 @@ class ProgressDialog(ctk.CTkToplevel):
         ctk.CTkLabel(self, textvariable=self.cancel_hint, text_color="#6D7E98", font=ctk.CTkFont(size=12)).grid(
             row=4, column=0, sticky="w", padx=28, pady=(14, 0)
         )
-        ctk.CTkButton(
+        self.cancel_button = ctk.CTkButton(
             self, text="Annuler", width=130, height=38,
             fg_color="#FFFFFF", hover_color="#F4F7FC", text_color=C["text"],
             border_width=1, border_color=C["line"], corner_radius=12,
             command=self.cancel
-        ).grid(row=5, column=0, sticky="e", padx=28, pady=(12, 20))
+        )
+        self.cancel_button.grid(row=5, column=0, sticky="e", padx=28, pady=(12, 20))
         self.maximum = 1
 
         # Sous Windows, un grab modal maintenu pendant la réduction peut empêcher
@@ -646,6 +668,9 @@ class ProgressDialog(ctk.CTkToplevel):
 
     def _bring_to_front(self):
         try:
+            if self.cancelled():
+                self.grab_release()
+                return
             if not self.winfo_exists() or self.parent.state() == "iconic":
                 return
             if self.state() == "iconic":
@@ -657,9 +682,19 @@ class ProgressDialog(ctk.CTkToplevel):
             pass
 
     def cancel(self):
+        if self._cancelled.is_set():
+            return
         self._cancelled.set()
         self.text.set("Annulation en cours…")
-        self.cancel_hint.set("L'analyse s'arrête dès que l'étape en cours est finie.")
+        self.cancel_hint.set("L'analyse va s'arrêter sans bloquer l'application.")
+        try:
+            self.cancel_button.configure(text="Annulation…", state="disabled")
+            self.grab_release()
+            self.withdraw()
+            self.parent.lift()
+            self.parent.focus_force()
+        except Exception:
+            pass
 
     def cancelled(self):
         return self._cancelled.is_set()
@@ -670,10 +705,27 @@ class ProgressDialog(ctk.CTkToplevel):
 
     def update_progress(self, text=None, value=None, maximum=None):
         # Cette méthode est appelée depuis le thread d'analyse/copie. Aucun appel
-        # Tk ne doit être fait depuis ce thread : on passe par la file de l'UI.
-        self.parent.call_on_ui(
-            self._apply_progress, text=text, value=value, maximum=maximum
-        )
+        # Tk ne doit être fait depuis ce thread. On ne conserve que la valeur la
+        # plus récente pour éviter que des centaines d'actualisations identiques
+        # saturent la file de l'interface.
+        with self._progress_lock:
+            if text is not None:
+                self._pending_progress["text"] = text
+            if value is not None:
+                self._pending_progress["value"] = value
+            if maximum is not None:
+                self._pending_progress["maximum"] = maximum
+            if self._progress_enqueued:
+                return
+            self._progress_enqueued = True
+        self.parent.call_on_ui(self._flush_progress)
+
+    def _flush_progress(self):
+        with self._progress_lock:
+            pending = self._pending_progress
+            self._pending_progress = {}
+            self._progress_enqueued = False
+        self._apply_progress(**pending)
 
     def _apply_progress(self, text=None, value=None, maximum=None):
         try:
@@ -734,7 +786,15 @@ class FullImage(ctk.CTkToplevel):
 
         try:
             with Image.open(path) as image:
-                self.source_image = ImageOps.exif_transpose(image).convert("RGB").copy()
+                # JPEG peut alors décoder directement une version adaptée à
+                # l'écran au lieu d'allouer inutilement la photo pleine taille.
+                try:
+                    image.draft("RGB", (4096, 4096))
+                except Exception:
+                    pass
+                prepared = ImageOps.exif_transpose(image).convert("RGB")
+                prepared.thumbnail((4096, 4096), Image.Resampling.LANCZOS)
+                self.source_image = prepared.copy()
             self.bind("<Configure>", self._schedule_refit, add="+")
             self.bind("<Escape>", lambda _e: self._leave_fullscreen(), add="+")
             self.bind("<F11>", lambda _e: self._toggle_fullscreen(), add="+")
@@ -869,13 +929,15 @@ class TriPhotosApp(ctk.CTk):
         self.close_after_export = False
         self.window_is_minimized = False
         self.ui_queue = queue.Queue()
+        self.analysis_in_progress = False
+        self.analysis_thread = None
 
         try:
-            icon_path = Path(__file__).with_name("triphotos_icon.png")
+            icon_path = Path(__file__).with_name("triphotos_icon_hd.png")
             icon = Image.open(icon_path)
             self.window_icon = ImageTk.PhotoImage(icon)
             self.iconphoto(True, self.window_icon)
-            header_icon_path = Path(__file__).with_name("triphotos_icon_final.png")
+            header_icon_path = Path(__file__).with_name("triphotos_icon_hd.png")
             header_icon = Image.open(header_icon_path) if header_icon_path.exists() else icon
             self.icon_image = ctk.CTkImage(light_image=header_icon, dark_image=header_icon, size=(94, 94))
 
@@ -1499,18 +1561,22 @@ class TriPhotosApp(ctk.CTk):
         self.ui_queue.put((callback, args, kwargs))
 
     def _drain_ui_queue(self):
-        try:
-            while True:
+        processed = 0
+        started = time.perf_counter()
+        while processed < 32 and (time.perf_counter() - started) < 0.008:
+            try:
                 callback, args, kwargs = self.ui_queue.get_nowait()
-                try:
-                    callback(*args, **kwargs)
-                except Exception:
-                    pass
-        except queue.Empty:
-            pass
+            except queue.Empty:
+                break
+            try:
+                callback(*args, **kwargs)
+            except Exception:
+                pass
+            processed += 1
         try:
             if self.winfo_exists():
-                self.after(40, self._drain_ui_queue)
+                delay = 1 if not self.ui_queue.empty() else 40
+                self.after(delay, self._drain_ui_queue)
         except Exception:
             pass
 
@@ -1573,7 +1639,7 @@ class TriPhotosApp(ctk.CTk):
         self.header_canvas.bind("<ButtonRelease-1>", self._stop_window_drag, add="+")
 
         # Images Canvas chargées depuis les assets PNG transparents.
-        self._header_logo_pil = Image.open(Path(__file__).with_name("triphotos_icon_final.png")).convert("RGBA")
+        self._header_logo_pil = Image.open(Path(__file__).with_name("triphotos_icon_hd.png")).convert("RGBA")
         self._header_home_pil = Image.open(Path(__file__).with_name("home.png")).convert("RGBA")
         self._header_save_pil = Image.open(Path(__file__).with_name("save.png")).convert("RGBA")
         self._header_settings_pil = Image.open(Path(__file__).with_name("settings.png")).convert("RGBA")
@@ -2114,6 +2180,12 @@ class TriPhotosApp(ctk.CTk):
             self.save_settings()
 
     def begin_analysis(self):
+        if self.analysis_in_progress:
+            messagebox.showinfo(
+                "Analyse en cours",
+                "L'analyse précédente est encore en train de s'arrêter. Réessaie dans un instant."
+            )
+            return
         source_text = self.source_entry.get().strip() if hasattr(self, "source_entry") else self.source_var.get().strip()
         source = Path(source_text)
         if not source.exists():
@@ -2131,11 +2203,25 @@ class TriPhotosApp(ctk.CTk):
         self.source_dir = source
         self.session_path = self.config_dir / "working_session.json"
         progress = ProgressDialog(self, "Analyse de la photothèque")
-        threading.Thread(
+        self.analysis_in_progress = True
+        self.analysis_thread = threading.Thread(
             target=self.analysis_worker,
             args=(source, None, progress),
             daemon=True
-        ).start()
+        )
+        self.analysis_thread.start()
+
+    def _finish_analysis(self, progress, outcome, message=None):
+        try:
+            progress.destroy()
+        except Exception:
+            pass
+        self.analysis_in_progress = False
+        self.analysis_thread = None
+        if outcome == "success":
+            self.show_review()
+        elif outcome == "error" and not self.closing:
+            messagebox.showerror("Analyse impossible", message or "Erreur inconnue.")
 
     def analysis_worker(self, source, output, progress):
         try:
@@ -2152,15 +2238,18 @@ class TriPhotosApp(ctk.CTk):
 
             ensure_not_cancelled()
             output_is_inside_source = False if output is None else is_relative_to(output, source)
-            photos = sorted(
-                (
-                    p for p in source.rglob("*")
-                    if p.is_file()
-                    and p.suffix.lower() in allowed
-                    and not (output_is_inside_source and is_relative_to(p, output))
-                ),
-                key=lambda p: natural_path_key(p.relative_to(source))
-            )
+            photos = []
+            for scan_index, path in enumerate(source.rglob("*")):
+                if scan_index % 64 == 0:
+                    ensure_not_cancelled()
+                    time.sleep(0)
+                if (
+                    path.is_file()
+                    and path.suffix.lower() in allowed
+                    and not (output_is_inside_source and is_relative_to(path, output))
+                ):
+                    photos.append(path)
+            photos.sort(key=lambda path: natural_path_key(path.relative_to(source)))
             if not photos:
                 raise RuntimeError("Aucune photo compatible trouvée.")
 
@@ -2170,7 +2259,11 @@ class TriPhotosApp(ctk.CTk):
             for i, path in enumerate(photos, 1):
                 ensure_not_cancelled()
                 try:
-                    exact[(path.stat().st_size, sha256_file(path))].append(path)
+                    exact[(path.stat().st_size, sha256_file(
+                        path, cancel_check=ensure_not_cancelled
+                    ))].append(path)
+                except AnalysisCancelled:
+                    raise
                 except Exception:
                     # Une erreur de lecture ne doit jamais faire disparaître une photo.
                     hash_failed.append(path)
@@ -2187,9 +2280,11 @@ class TriPhotosApp(ctk.CTk):
             for i, path in enumerate(representatives, 1):
                 ensure_not_cancelled()
                 try:
-                    rec = image_metrics(path)
+                    rec = image_metrics(path, cancel_check=ensure_not_cancelled)
                     rec["score"] = quality_score(rec)
                     representative_records.append(rec)
+                except AnalysisCancelled:
+                    raise
                 except Exception as exc:
                     skipped.append({"path": str(path), "error": str(exc)})
                 progress.update_progress(value=i)
@@ -2257,22 +2352,19 @@ class TriPhotosApp(ctk.CTk):
             # Toutes les photos lisibles entrent dans la file. Les ressemblances
             # sont prioritaires, puis les autres sont aussi affichées par paires.
             groups = build_complete_review_queue(records, pair_types, source_order)
+            ensure_not_cancelled()
             # Ne jamais fusionner cette analyse avec working_session.json ou
             # last_session.json : toutes les comparaisons repartent à zéro.
             self.session = build_fresh_session(
                 source, photos, records, skipped, groups, threshold, time_window
             )
+            ensure_not_cancelled()
             self.save_session(force=True)
-            self.call_on_ui(progress.destroy)
-            self.call_on_ui(self.show_review)
+            self.call_on_ui(self._finish_analysis, progress, "success")
         except AnalysisCancelled:
-            self.call_on_ui(progress.destroy)
+            self.call_on_ui(self._finish_analysis, progress, "cancelled")
         except Exception as exc:
-            message = str(exc)
-            self.call_on_ui(progress.destroy)
-            self.call_on_ui(
-                lambda msg=message: messagebox.showerror("Analyse impossible", msg)
-            )
+            self.call_on_ui(self._finish_analysis, progress, "error", str(exc))
 
     def normalize_session(self, session):
         if not isinstance(session.get("groups"), list):
@@ -2998,8 +3090,25 @@ class TriPhotosApp(ctk.CTk):
                 available_h = max(1, self.winfo_height() - 517)
 
             with Image.open(path) as image:
+                # Sur les grands JPEG, draft évite le décodage intégral de
+                # dizaines de mégapixels pour une vignette d'écran.
+                try:
+                    image.draft(
+                        "RGB",
+                        (max(1, available_w * 2), max(1, available_h * 2)),
+                    )
+                except Exception:
+                    pass
                 image = ImageOps.exif_transpose(image).convert("RGB")
-                width, height = image.size
+                decoded_width, decoded_height = image.size
+                width = int(record.get("width", 0) or decoded_width)
+                height = int(record.get("height", 0) or decoded_height)
+                reduce_factor = min(
+                    max(1, image.width // max(1, available_w * 2)),
+                    max(1, image.height // max(1, available_h * 2)),
+                )
+                if reduce_factor > 1:
+                    image = image.reduce(reduce_factor)
                 # Toujours afficher l'image entière dans son format d'origine.
                 # L'ancien remplissage recadrait fortement les paysages quand le
                 # cadre devenait très haut. Les marges éventuelles sont donc

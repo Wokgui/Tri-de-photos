@@ -8,9 +8,9 @@ py -m pip install pillow
 
 set "APPDIR=%~dp0"
 set "SCRIPT=%~dp0triphotos_v14_29.py"
-set "ICON_SRC=%~dp0triphotos_icon_final.png"
+set "ICON_SRC=%~dp0triphotos_icon_hd.png"
 set "ICON_DIR=%LOCALAPPDATA%\Tri de photos"
-set "ICON=%LOCALAPPDATA%\Tri de photos\Tri de photos final v12.ico"
+set "ICON=%LOCALAPPDATA%\Tri de photos\Tri de photos HD v13.ico"
 set "LOCAL_LINK=%~dp0Tri de photos.lnk"
 
 rem Nettoie les anciens lanceurs.

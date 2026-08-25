@@ -13,10 +13,10 @@ jobs:
       - name: Create ZIP
         run: |
           cd "Tri de photos v16 avec maximisation précalculée"
-          zip -r ../Tri-de-photos-v16-icone-corrigee.zip .
+          zip -r ../Tri-de-photos-v16-anti-freeze-icone-hd.zip .
       - name: Upload ZIP
         uses: actions/upload-artifact@v4
         with:
-          name: Tri-de-photos-v16-icone-corrigee
-          path: Tri-de-photos-v16-icone-corrigee.zip
+          name: Tri-de-photos-v16-anti-freeze-icone-hd
+          path: Tri-de-photos-v16-anti-freeze-icone-hd.zip
           compression-level: 0

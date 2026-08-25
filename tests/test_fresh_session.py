@@ -1,4 +1,10 @@
 import ast
+import hashlib
+import queue
+import tempfile
+import threading
+import time
+import types
 import unittest
 from datetime import datetime
 from pathlib import Path
@@ -12,6 +18,7 @@ APP_PATH = (
     / "triphotos_v14_29.py"
 )
 ICON_PATH = APP_PATH.with_name("triphotos_icon_final.png")
+HD_ICON_PATH = APP_PATH.with_name("triphotos_icon_hd.png")
 
 
 def load_session_helpers():
@@ -52,21 +59,140 @@ def load_session_helpers():
     build_fresh_session,
     build_complete_review_queue,
     normalize_session,
-    resolve_unique,
+resolve_unique,
 ) = load_session_helpers()
 
 
+def load_responsiveness_helpers():
+    tree = ast.parse(APP_PATH.read_text(encoding="utf-8"), filename=str(APP_PATH))
+    selected = [
+        node for node in tree.body
+        if (
+            isinstance(node, ast.ClassDef) and node.name == "AnalysisCancelled"
+        ) or (
+            isinstance(node, ast.FunctionDef) and node.name == "sha256_file"
+        )
+    ]
+    progress_class = next(
+        node for node in tree.body
+        if isinstance(node, ast.ClassDef) and node.name == "ProgressDialog"
+    )
+    selected.extend(
+        node for node in progress_class.body
+        if isinstance(node, ast.FunctionDef)
+        and node.name in {"update_progress", "_flush_progress"}
+    )
+    app_class = next(
+        node for node in tree.body
+        if isinstance(node, ast.ClassDef) and node.name == "TriPhotosApp"
+    )
+    selected.extend(
+        node for node in app_class.body
+        if isinstance(node, ast.FunctionDef) and node.name == "_drain_ui_queue"
+    )
+    namespace = {"hashlib": hashlib, "queue": queue, "time": time}
+    exec(compile(ast.Module(body=selected, type_ignores=[]), str(APP_PATH), "exec"), namespace)
+    return (
+        namespace["AnalysisCancelled"],
+        namespace["sha256_file"],
+        namespace["update_progress"],
+        namespace["_flush_progress"],
+        namespace["_drain_ui_queue"],
+    )
+
+
+(
+    AnalysisCancelled,
+    sha256_file,
+    update_progress,
+    flush_progress,
+    drain_ui_queue,
+) = load_responsiveness_helpers()
+
+
 class FreshSessionTests(unittest.TestCase):
+    def test_hashing_can_be_cancelled_between_chunks(self):
+        checks = 0
+
+        def cancel_check():
+            nonlocal checks
+            checks += 1
+            if checks == 3:
+                raise AnalysisCancelled("stop")
+
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "large-photo.bin"
+            path.write_bytes(b"x" * 8192)
+            with self.assertRaises(AnalysisCancelled):
+                sha256_file(path, chunk=1024, cancel_check=cancel_check)
+
+        self.assertEqual(checks, 3)
+
+    def test_progress_updates_are_coalesced_to_the_latest_value(self):
+        queued = []
+        applied = []
+
+        class Parent:
+            def call_on_ui(self, callback, *args, **kwargs):
+                queued.append((callback, args, kwargs))
+
+        dialog = types.SimpleNamespace(
+            parent=Parent(),
+            _progress_lock=threading.Lock(),
+            _pending_progress={},
+            _progress_enqueued=False,
+        )
+        dialog._apply_progress = lambda **values: applied.append(values)
+        dialog._flush_progress = types.MethodType(flush_progress, dialog)
+
+        for value in range(200):
+            update_progress(dialog, value=value, maximum=200)
+
+        self.assertEqual(len(queued), 1)
+        callback, args, kwargs = queued.pop()
+        callback(*args, **kwargs)
+        self.assertEqual(applied, [{"value": 199, "maximum": 200}])
+        self.assertFalse(dialog._progress_enqueued)
+
+    def test_ui_queue_is_drained_in_bounded_batches(self):
+        executed = []
+        scheduled = []
+        app = types.SimpleNamespace(ui_queue=queue.Queue())
+        app.winfo_exists = lambda: True
+        app.after = lambda delay, callback: scheduled.append((delay, callback))
+        app._drain_ui_queue = types.MethodType(drain_ui_queue, app)
+        for value in range(100):
+            app.ui_queue.put((lambda item=value: executed.append(item), (), {}))
+
+        drain_ui_queue(app)
+
+        self.assertGreater(len(executed), 0)
+        self.assertLessEqual(len(executed), 32)
+        self.assertGreater(app.ui_queue.qsize(), 0)
+        self.assertEqual(scheduled[0][0], 1)
+
     def test_header_uses_the_approved_transparent_icon_without_extra_shell(self):
         source = APP_PATH.read_text(encoding="utf-8")
         self.assertNotIn('with_name("triphotos_header_icon.png")', source)
         self.assertGreaterEqual(
-            source.count('with_name("triphotos_icon_final.png")'), 2
+            source.count('with_name("triphotos_icon_hd.png")'), 3
         )
         self.assertNotIn("round_rect(shell_x1", source)
 
         with Image.open(ICON_PATH).convert("RGBA") as icon:
             self.assertEqual(icon.size, (96, 96))
+            self.assertTrue(all(
+                icon.getpixel(point)[3] == 0
+                for point in (
+                    (0, 0),
+                    (icon.width - 1, 0),
+                    (0, icon.height - 1),
+                    (icon.width - 1, icon.height - 1),
+                )
+            ))
+
+        with Image.open(HD_ICON_PATH).convert("RGBA") as icon:
+            self.assertEqual(icon.size, (1254, 1254))
             self.assertTrue(all(
                 icon.getpixel(point)[3] == 0
                 for point in (
