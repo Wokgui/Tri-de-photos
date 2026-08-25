@@ -438,6 +438,73 @@ def build_fresh_session(source, photos, records, skipped, groups, threshold, tim
         "complete": False,
     }
 
+
+def build_complete_review_queue(records, pair_types, source_order):
+    """Crée une file où chaque photo lisible apparaît exactement une fois.
+
+    Les doublons et photos proches sont associés en priorité. Les photos sans
+    correspondance restent des étapes individuelles au lieu d'être classées
+    automatiquement, afin qu'une nouvelle analyse reparte vraiment du début.
+    """
+    records_by_path = {record["path"]: record for record in records}
+    used_paths = set()
+    groups = []
+    ordered_pairs = sorted(
+        pair_types.items(),
+        key=lambda item: (
+            source_order.get(item[0][0], len(source_order)),
+            source_order.get(item[0][1], len(source_order)),
+            0 if item[1] == "exact" else 1,
+        ),
+    )
+
+    for (left_path, right_path), pair_type in ordered_pairs:
+        if left_path in used_paths or right_path in used_paths:
+            continue
+        if left_path not in records_by_path or right_path not in records_by_path:
+            continue
+        used_paths.update((left_path, right_path))
+        groups.append({
+            "type": pair_type,
+            "items": [left_path, right_path],
+            "records": {
+                left_path: records_by_path[left_path],
+                right_path: records_by_path[right_path],
+            },
+            "status": "pending",
+            "kept": [],
+            "rejected": [],
+            "aside": [],
+            "candidate": left_path,
+            "remaining": [right_path],
+        })
+
+    for record in records:
+        path = record["path"]
+        if path in used_paths:
+            continue
+        used_paths.add(path)
+        groups.append({
+            "type": "unique",
+            "items": [path],
+            "records": {path: record},
+            "status": "pending",
+            "kept": [],
+            "rejected": [],
+            "aside": [],
+            "unique_target": path,
+            "candidate": path,
+            "remaining": [],
+        })
+
+    groups.sort(
+        key=lambda group: min(
+            (source_order.get(path, len(source_order)) for path in group["items"]),
+            default=len(source_order),
+        )
+    )
+    return groups
+
 def is_relative_to(path, parent):
     try:
         Path(path).resolve().relative_to(Path(parent).resolve())
@@ -1877,7 +1944,7 @@ class TriPhotosApp(ctk.CTk):
         )
         canvas.create_text(
             content_x, 77 * scale,
-            text="Choisissez un dossier. L'application repère les photos réellement proches et ne vous présente que les comparaisons utiles.",
+            text="Choisissez un dossier. Chaque photo sera présentée depuis le début ; les photos réellement proches seront comparées deux par deux.",
             anchor="nw", fill="#66789A",
             font=("Segoe UI", -max(1, int(round(16 * scale)))),
             tags="home_background",
@@ -2152,36 +2219,9 @@ class TriPhotosApp(ctk.CTk):
                 key = (a, b) if source_order.get(a, 0) <= source_order.get(b, 0) else (b, a)
                 pair_types.setdefault(key, "similar")
 
-            ordered_pairs = sorted(
-                pair_types.items(),
-                key=lambda item: (
-                    source_order.get(item[0][0], len(source_order)),
-                    source_order.get(item[0][1], len(source_order)),
-                    0 if item[1] == "exact" else 1,
-                )
-            )
-
-            groups = []
-            paired_paths = set()
-            for (left_path, right_path), pair_type in ordered_pairs:
-                paired_paths.update((left_path, right_path))
-                left_record = records_by_path.get(left_path, {"path": left_path, "score": 1.0 if pair_type == "exact" else 0.0})
-                right_record = records_by_path.get(right_path, {"path": right_path, "score": 1.0 if pair_type == "exact" else 0.0})
-                groups.append({
-                    "type": pair_type,
-                    "items": [left_path, right_path],
-                    "records": {left_path: left_record, right_path: right_record},
-                    "status": "pending",
-                    "kept": [],
-                    "rejected": [],
-                    "aside": [],
-                    "candidate": left_path,
-                    "remaining": [right_path],
-                })
-
-            # Les photos sans correspondance pertinente sont conservées automatiquement.
-            # Elles ne sont jamais associées artificiellement à une photo voisine : l'écran
-            # « deux par deux » ne montre donc que de vraies comparaisons.
+            # Toutes les photos lisibles entrent dans la file. Les ressemblances
+            # sont comparées deux par deux et les autres sont validées une à une.
+            groups = build_complete_review_queue(records, pair_types, source_order)
             # Ne jamais fusionner cette analyse avec working_session.json ou
             # last_session.json : toutes les comparaisons repartent à zéro.
             self.session = build_fresh_session(
@@ -2214,9 +2254,11 @@ class TriPhotosApp(ctk.CTk):
                     rejected.append(item)
             if group.get("type") == "unique":
                 target = group.get("unique_target") or group.get("candidate")
-                if target and target not in global_rejected:
-                    unique_keep.add(target)
-                continue
+                if target:
+                    group["unique_target"] = target
+                    group.setdefault("items", [target])
+                    group.setdefault("candidate", target)
+                    group.setdefault("remaining", [])
             cleaned_groups.append(group)
 
         session["groups"] = cleaned_groups
@@ -2672,6 +2714,23 @@ class TriPhotosApp(ctk.CTk):
         group = groups[idx]
         if group.get("status") != "pending":
             return
+        if group.get("type") == "unique":
+            target = group.get("unique_target") or group.get("candidate")
+            if not target:
+                return
+            records = group.get("records", {})
+            self.fill_photo(
+                self.left_card, target, records.get(target, {}),
+                "left", recommended=False
+            )
+            self.clear_photo_card(
+                self.right_card,
+                "Cette photo n’a pas de doublon proche.\nValidez-la pour poursuivre le tri."
+            )
+            self._schedule_review_geometry(
+                left=target, right=target, records=records
+            )
+            return
         left = group.get("display_left")
         right = group.get("display_right")
         if not left or not right:
@@ -2778,14 +2837,33 @@ class TriPhotosApp(ctk.CTk):
 
             if group.get("type") == "unique":
                 target = group.get("unique_target") or group.get("candidate")
-                if target and target not in set(self.session.get("global_rejected", [])):
-                    unique_keep = set(self.session.get("unique_keep", []))
-                    unique_keep.add(target)
-                    self.session["unique_keep"] = sorted(unique_keep, key=natural_path_key)
-                group["status"] = "done"
-                self.session["group_index"] += 1
-                session_changed = True
-                continue
+                if not target:
+                    group["status"] = "done"
+                    self.session["group_index"] += 1
+                    session_changed = True
+                    continue
+                if getattr(self, "action_buttons", None):
+                    self.set_action_button(self.action_buttons[0], "Garder la photo", "←", C["green"], C["green_hover"], self.keep_unique)
+                    self.set_action_button(self.action_buttons[1], "Mettre de côté", "→", C["red"], C["red_hover"], self.reject_unique)
+                    self.set_action_button(self.action_buttons[2], "Voir plus tard", "↑", C["blue2"], "#1D4ED8", self.defer_unique)
+                    self.set_action_button(self.action_buttons[3], "Mettre de côté", "Suppr", "#7C3AED", "#6D28D9", self.reject_unique)
+                    self.set_action_button(self.action_buttons[4], "Annuler le choix", "Ctrl+Z", C["soft"], C["soft_hover"], self.undo, C["text"])
+                records = group.get("records", {})
+                group["display_left"] = target
+                group["display_right"] = None
+                self.fill_photo(
+                    self.left_card, target, records.get(target, {}),
+                    "left", recommended=False
+                )
+                self.clear_photo_card(
+                    self.right_card,
+                    "Cette photo n’a pas de doublon proche.\nValidez-la pour poursuivre le tri."
+                )
+                self._schedule_review_geometry(
+                    left=target, right=target, records=records
+                )
+                self.update_progress_display()
+                return
 
             if getattr(self, "action_buttons", None):
                 self.set_action_button(self.action_buttons[0], "Garder la gauche", "←", C["red"], C["red_hover"], self.keep_left)
@@ -2923,6 +3001,19 @@ class TriPhotosApp(ctk.CTk):
             card["recommendation"].set("")
             card["hint"].set("")
 
+    def clear_photo_card(self, card, message=""):
+        card["image"].configure(image="", text=message)
+        card["name"].set("")
+        card["meta"].set("")
+        card["score"].set("— / 100")
+        card["recommendation"].set("")
+        card["recommendation_label"].configure(
+            fg_color="transparent", text_color=C["muted"]
+        )
+        card["hint"].set("")
+        card["open"].configure(command=lambda: None)
+        self.right_photo = None
+
     def compute_selection_counts(self):
         rejected = set(self.session.get("global_rejected", []))
         kept = set(self.session.get("unique_keep", []))
@@ -2934,7 +3025,7 @@ class TriPhotosApp(ctk.CTk):
     def update_progress_display(self):
         total_files = int(self.session.get("total_files", 0) or 0)
         groups = self.session.get("groups", [])
-        total_comparisons = sum(1 for g in groups if g.get("type") != "unique")
+        total_comparisons = len(groups)
         comparisons_done = int(self.session.get("comparisons_done", 0) or 0)
         reviewed = set(self.session.get("reviewed_files", []))
         automatic = set(self.session.get("unique_keep", []))
@@ -3054,13 +3145,16 @@ class TriPhotosApp(ctk.CTk):
         target = group.get("unique_target") or group.get("candidate")
         rejected = set(self.session.get("global_rejected", []))
         reviewed = set(self.session.get("reviewed_files", []))
+        unique_keep = set(self.session.get("unique_keep", []))
         if action == "keep":
             rejected.discard(target)
             reviewed.add(target)
+            unique_keep.add(target)
             group["status"] = "done"
         elif action == "reject":
             rejected.add(target)
             reviewed.add(target)
+            unique_keep.discard(target)
             group["status"] = "done"
         elif action == "defer":
             # Replace la photo à la fin des décisions restantes sans la compter.
@@ -3069,8 +3163,10 @@ class TriPhotosApp(ctk.CTk):
             groups.append(groups.pop(idx))
         self.session["global_rejected"] = sorted(rejected, key=natural_path_key)
         self.session["reviewed_files"] = sorted(reviewed, key=natural_path_key)
+        self.session["unique_keep"] = sorted(unique_keep, key=natural_path_key)
         if action != "defer":
             self.session["group_index"] += 1
+            self.session["comparisons_done"] += 1
         self.save_session()
         self.show_current_pair()
         self.after(120, lambda: setattr(self, "decision_in_progress", False))
@@ -3572,8 +3668,8 @@ class TriPhotosApp(ctk.CTk):
 
         card = self.settings_card(canvas, 1, 2, "Comportement")
         facts = [
-            "Les photos sans doublon ou série proche sont conservées automatiquement.",
-            "Deux photos sans rapport ne sont jamais présentées ensemble.",
+            "Chaque photo lisible du dossier est présentée et doit être validée.",
+            "Les photos proches sont comparées deux par deux ; les autres sont présentées seules.",
             "La touche Suppr écarte les deux photos de la comparaison en cours.",
             "Les fichiers originaux ne sont jamais supprimés ni déplacés.",
         ]

@@ -14,19 +14,42 @@ APP_PATH = (
 def load_session_helpers():
     """Charge seulement les fonctions pures, sans initialiser l'interface Tk."""
     tree = ast.parse(APP_PATH.read_text(encoding="utf-8"), filename=str(APP_PATH))
-    names = {"natural_path_key", "build_fresh_session"}
+    names = {
+        "natural_path_key",
+        "build_fresh_session",
+        "build_complete_review_queue",
+    }
     selected = [
         node
         for node in tree.body
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
         and node.name in names
     ]
+    app_class = next(
+        node for node in tree.body
+        if isinstance(node, ast.ClassDef) and node.name == "TriPhotosApp"
+    )
+    selected.extend(
+        node for node in app_class.body
+        if isinstance(node, ast.FunctionDef)
+        and node.name in {"normalize_session", "resolve_unique"}
+    )
     namespace = {"datetime": datetime}
     exec(compile(ast.Module(body=selected, type_ignores=[]), str(APP_PATH), "exec"), namespace)
-    return namespace["build_fresh_session"]
+    return (
+        namespace["build_fresh_session"],
+        namespace["build_complete_review_queue"],
+        namespace["normalize_session"],
+        namespace["resolve_unique"],
+    )
 
 
-build_fresh_session = load_session_helpers()
+(
+    build_fresh_session,
+    build_complete_review_queue,
+    normalize_session,
+    resolve_unique,
+) = load_session_helpers()
 
 
 class FreshSessionTests(unittest.TestCase):
@@ -48,8 +71,20 @@ class FreshSessionTests(unittest.TestCase):
             "display_right": str(photos[1]),
         }
 
+        single_group = {
+            "type": "unique",
+            "items": [str(photos[2])],
+            "records": {str(photos[2]): records[2]},
+            "status": "done",
+            "kept": [str(photos[2])],
+            "rejected": [],
+            "candidate": str(photos[2]),
+            "remaining": [],
+            "unique_target": str(photos[2]),
+        }
         session = build_fresh_session(
-            source, photos, records, [], [stale_group], threshold=8, time_window=120
+            source, photos, records, [], [stale_group, single_group],
+            threshold=8, time_window=120
         )
 
         self.assertEqual(session["all_files"], [str(path) for path in photos])
@@ -68,7 +103,44 @@ class FreshSessionTests(unittest.TestCase):
         self.assertEqual(group["remaining"], [str(photos[1])])
         self.assertNotIn("display_left", group)
         self.assertNotIn("display_right", group)
-        self.assertEqual(session["unique_keep"], [str(photos[2])])
+        self.assertEqual(session["groups"][1]["status"], "pending")
+        self.assertEqual(session["groups"][1]["candidate"], str(photos[2]))
+        self.assertEqual(session["unique_keep"], [])
+
+    def test_six_hundred_photos_all_enter_the_queue_once(self):
+        source = Path("C:/Photos/Grand-dossier")
+        records = [
+            {"path": str(source / f"photo{index:03}.jpg"), "score": 0.5}
+            for index in range(1, 601)
+        ]
+        source_order = {
+            record["path"]: index for index, record in enumerate(records)
+        }
+        pair_types = {}
+        for index in range(590, 600, 2):
+            pair_types[(records[index]["path"], records[index + 1]["path"])] = "similar"
+
+        groups = build_complete_review_queue(records, pair_types, source_order)
+
+        queued_paths = [path for group in groups for path in group["items"]]
+        self.assertEqual(len(queued_paths), 600)
+        self.assertEqual(len(set(queued_paths)), 600)
+        self.assertEqual(set(queued_paths), {record["path"] for record in records})
+        self.assertEqual(groups[0]["items"], [records[0]["path"]])
+        self.assertEqual(groups[0]["type"], "unique")
+        self.assertEqual(groups[-1]["items"], [records[598]["path"], records[599]["path"]])
+        self.assertTrue(all(group["status"] == "pending" for group in groups))
+
+        photos = [Path(record["path"]) for record in records]
+        session = build_fresh_session(
+            source, photos, records, [], groups, threshold=8, time_window=120
+        )
+        self.assertEqual(session["total_files"], 600)
+        self.assertEqual(session["reviewed_files"], [])
+        self.assertEqual(session["unique_keep"], [])
+        self.assertEqual(session["group_index"], 0)
+        self.assertEqual(session["comparisons_done"], 0)
+        self.assertEqual(session["total_candidate_pairs"], len(groups))
 
     def test_fresh_session_does_not_mutate_the_analyzed_groups(self):
         source = Path("C:/Photos")
@@ -87,6 +159,76 @@ class FreshSessionTests(unittest.TestCase):
         self.assertEqual(original["status"], "done")
         self.assertEqual(original["kept"], [str(photos[0])])
         self.assertEqual(original["rejected"], [str(photos[1])])
+
+    def test_resume_keeps_an_unreviewed_single_photo_pending(self):
+        path = "C:/Photos/photo1.jpg"
+        session = {
+            "groups": [{
+                "type": "unique",
+                "items": [path],
+                "records": {path: {"path": path}},
+                "status": "pending",
+                "candidate": path,
+                "remaining": [],
+                "kept": [],
+                "rejected": [],
+            }],
+            "unique_keep": [],
+            "global_rejected": [],
+            "all_files": [path],
+        }
+
+        normalized = normalize_session(object(), session)
+
+        self.assertEqual(len(normalized["groups"]), 1)
+        self.assertEqual(normalized["groups"][0]["status"], "pending")
+        self.assertEqual(normalized["group_index"], 0)
+
+    def test_validating_a_single_photo_updates_progress(self):
+        path = "C:/Photos/photo1.jpg"
+        group = {
+            "type": "unique",
+            "status": "pending",
+            "candidate": path,
+            "unique_target": path,
+        }
+
+        class DummyApp:
+            decision_in_progress = False
+
+            def __init__(self):
+                self.session = {
+                    "groups": [group],
+                    "group_index": 0,
+                    "global_rejected": [],
+                    "reviewed_files": [],
+                    "unique_keep": [],
+                    "comparisons_done": 0,
+                }
+
+            def current_group(self):
+                return self.session["groups"][self.session["group_index"]]
+
+            def snapshot(self):
+                pass
+
+            def save_session(self):
+                pass
+
+            def show_current_pair(self):
+                pass
+
+            def after(self, _delay, callback):
+                callback()
+
+        app = DummyApp()
+        resolve_unique(app, "keep")
+
+        self.assertEqual(group["status"], "done")
+        self.assertEqual(app.session["reviewed_files"], [path])
+        self.assertEqual(app.session["unique_keep"], [path])
+        self.assertEqual(app.session["comparisons_done"], 1)
+        self.assertEqual(app.session["group_index"], 1)
 
 
 if __name__ == "__main__":
